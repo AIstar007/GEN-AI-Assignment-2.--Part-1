@@ -5,4 +5,5 @@ gunicorn
 psycopg2-binary   # needed for Postgres
 pandas
 openpyxl
+python-dotenv
 django-import-export
