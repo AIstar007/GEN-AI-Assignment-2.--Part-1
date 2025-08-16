@@ -1,1 +1,1 @@
-web: gunicorn your_project_name.wsgi --chdir backend --log-file -
+gunicorn mimic_backend.wsgi --chdir backend --log-file -
