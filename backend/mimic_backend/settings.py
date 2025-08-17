@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from dotenv import load_dotenv   # ✅ to load .env
+from dotenv import load_dotenv   
 
 # -------------------- BASE DIR -------------------- #
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -94,7 +94,7 @@ STATIC_URL = "/static/"
 # ✅ Where collectstatic will put files (for production)
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
-# ✅ Extra places to look for static (optional)
+# ✅ Extra places to look for static (only if you have local static/)
 STATICFILES_DIRS = [
     BASE_DIR / "static",
 ]
