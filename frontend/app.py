@@ -11,20 +11,12 @@ BACKEND_URL = os.environ.get("BACKEND_URL", "http://127.0.0.1:8000/api")
 st.set_page_config(page_title="Mimic – Agentic UI", layout="wide")
 
 # --------------------------- HELPERS --------------------------- #
-def clean_path(path: str) -> str:
-    # Prevents accidental double `/api/api/`
-    if path.startswith("/api/"):
-        path = path[4:]   # strip "/api"
-    return path if path.startswith("/") else "/" + path
-
 def api_get(path, params=None):
-    path = clean_path(path)
     r = requests.get(f"{BACKEND_URL}{path}", params=params)
     r.raise_for_status()
     return r.json()
 
 def api_post(path, data=None):
-    path = clean_path(path)
     r = requests.post(f"{BACKEND_URL}{path}", json=data or {})
     r.raise_for_status()
     return r.json()
@@ -174,7 +166,7 @@ with tab_chat:
                 if close:
                     detected_app = close[0]
 
-        # ---------------- App Detected → Confirm Install ---------------- #
+                # ---------------- App Detected → Confirm Install ---------------- #
         if detected_app:
             st.session_state.chat_history.append({
                 "role": "assistant",
@@ -205,28 +197,52 @@ with tab_chat:
                     key=f"chat_ver_{len(st.session_state.chat_history)}"
                 )
 
+                # ---------------- Eligibility Check ---------------- #
+                APP_ELIGIBILITY = {
+                    "user": {"Zoom": ["latest", "5.0"]},
+                    "manager": {"Zoom": ["latest", "5.0", "5.1"], "MS Excel": ["2019", "2021"]},
+                    "admin": {
+                        "MS Word": ["2016", "2019", "2021"],
+                        "MS Excel": ["2016", "2019", "2021"],
+                        "Zoom": ["5.0", "5.1", "latest"],
+                        "Slack": ["4.20", "4.21", "latest"]
+                    }
+                }
+                allowed_versions = APP_ELIGIBILITY.get(user["role"], {}).get(selected_app, [])
+                eligible = selected_ver in allowed_versions
+
+                if eligible:
+                    with st.expander("✅ Eligible! Click to download installer"):
+                        st.download_button(
+                            "⬇️ Download Package",
+                            data=f"Dummy installer for {selected_app} {selected_ver}".encode(),
+                            file_name=f"{selected_app}-{selected_ver}.zip",
+                            mime="application/zip",
+                            key=f"dl_{selected_app}_{selected_ver}"
+                        )
+                else:
+                    st.error(f"⛔ Not eligible for {selected_app} {selected_ver}")
+
+                # ---------------- Confirm & Install ---------------- #
                 if st.button("🚀 Confirm & Install", key=f"install_{len(st.session_state.chat_history)}"):
-                    action = f"install {selected_app} {selected_ver}"
-                    ticket_id = create_ticket(user, action)
-                    log_action_via_agent(action, user["username"])
+                    if not eligible:
+                        st.error("⛔ Cannot install: Not eligible for your role.")
+                    else:
+                        action = f"install {selected_app} {selected_ver}"
+                        ticket_id = create_ticket(user, action)
+                        log_action_via_agent(action, user["username"])
 
-                    with st.spinner(f"🚀 Deploying {selected_app} {selected_ver}..."):
-                        progress = st.progress(0)
-                        for i in range(1, 101, 10):
-                            time.sleep(0.15)
-                            progress.progress(i)
+                        with st.spinner(f"🚀 Deploying {selected_app} {selected_ver}..."):
+                            progress = st.progress(0)
+                            for i in range(1, 101, 10):
+                                time.sleep(0.15)
+                                progress.progress(i)
 
-                    st.success(f"✅ Deployment complete! Ticket {ticket_id}")
-                    st.download_button(
-                        "⬇️ Download Package",
-                        data=f"Dummy installer for {selected_app} {selected_ver}".encode(),
-                        file_name=f"{selected_app}-{selected_ver}.zip",
-                        mime="application/zip"
-                    )
-                    st.session_state.chat_history.append({
-                        "role": "assistant",
-                        "text": f"✅ Installed {selected_app} {selected_ver}. Ticket {ticket_id} created."
-                    })
+                        st.success(f"✅ Deployment complete! Ticket {ticket_id}")
+                        st.session_state.chat_history.append({
+                            "role": "assistant",
+                            "text": f"✅ Installed {selected_app} {selected_ver}. Ticket {ticket_id} created."
+                        })
 
         # ---------------- Otherwise → Fallback Chatbot ---------------- #
         else:
@@ -492,4 +508,3 @@ with tab_requests:
             file_name="requests.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-
