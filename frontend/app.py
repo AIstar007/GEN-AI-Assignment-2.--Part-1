@@ -24,7 +24,7 @@ def api_post(path, data=None):
 def log_action_via_agent(text: str, user="system"):
     """Send logs to Django backend via /agent/ endpoint"""
     try:
-        api_post("/agent/", {"input": text, "user": user})
+        api_post("/agent/", {"input": text, "user": user})   # ✅ fixed
     except Exception as e:
         st.warning(f"Could not log action: {e}")
 
@@ -226,7 +226,7 @@ with tab_chat:
             payload = {"input": user_input, "user": user["username"], "model": chosen_model}
 
             try:
-                res = api_post("/agent/", payload)
+                res = api_post("/agent/", payload)   # ✅ fixed
                 if "output" in res:
                     reply = res["output"]
                 elif "message" in res:
@@ -277,7 +277,7 @@ with tab_files:
 # --------------------------- LOGS TAB --------------------------- #
 with tab_logs:
     try:
-        logs = api_get("/logs/")
+        logs = api_get("/logs/")   # ✅ fixed
     except Exception as e:
         st.error(f"Error fetching logs: {e}")
         logs = []
