@@ -24,15 +24,19 @@ INSTALLED_APPS = [
     "rest_framework",       # ✅ DRF
     "core",                 # ✅ your app
     "django_extensions",    # ✅ so shell_plus etc. work
-    'import_export',
+    "import_export",
 
     # your app
-    'main',
+    "main",
 ]
 
 # -------------------- MIDDLEWARE -------------------- #
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+
+    # ✅ WhiteNoise for static file serving in production
+    "whitenoise.middleware.WhiteNoiseMiddleware",
+
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -84,13 +88,23 @@ TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
-# -------------------- STATIC -------------------- #
-STATIC_URL = "static/"
+# -------------------- STATIC FILES -------------------- #
+STATIC_URL = "/static/"
+
+# ✅ Where collectstatic will put files (for production)
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# ✅ Extra places to look for static (optional)
+STATICFILES_DIRS = [
+    BASE_DIR / "static",
+]
+
+# ✅ WhiteNoise compression + cache busting
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 # -------------------- DEFAULT PK -------------------- #
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # -------------------- CUSTOM -------------------- #
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 SERVICE_NOW_EXCEL = os.environ.get("SERVICE_NOW_EXCEL", "servicenow_requests.xlsx")
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://127.0.0.1:8000/api")
