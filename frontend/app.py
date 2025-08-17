@@ -11,12 +11,20 @@ BACKEND_URL = os.environ.get("BACKEND_URL", "http://127.0.0.1:8000/api")
 st.set_page_config(page_title="Mimic – Agentic UI", layout="wide")
 
 # --------------------------- HELPERS --------------------------- #
+def clean_path(path: str) -> str:
+    # Prevents accidental double `/api/api/`
+    if path.startswith("/api/"):
+        path = path[4:]   # strip "/api"
+    return path if path.startswith("/") else "/" + path
+
 def api_get(path, params=None):
+    path = clean_path(path)
     r = requests.get(f"{BACKEND_URL}{path}", params=params)
     r.raise_for_status()
     return r.json()
 
 def api_post(path, data=None):
+    path = clean_path(path)
     r = requests.post(f"{BACKEND_URL}{path}", json=data or {})
     r.raise_for_status()
     return r.json()
@@ -484,3 +492,4 @@ with tab_requests:
             file_name="requests.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
