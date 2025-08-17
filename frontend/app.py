@@ -1,10 +1,9 @@
-import os, io, time, uuid
+import os, io, time, uuid, time
 import pandas as pd
 import streamlit as st
 import requests
 import difflib
 import re
-
 
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://127.0.0.1:8000/api")
 
@@ -24,7 +23,7 @@ def api_post(path, data=None):
 def log_action_via_agent(text: str, user="system"):
     """Send logs to Django backend via /agent/ endpoint"""
     try:
-        api_post("/agent/", {"input": text, "user": user})   # ✅ fixed
+        api_post("/agent/", {"input": text, "user": user})
     except Exception as e:
         st.warning(f"Could not log action: {e}")
 
@@ -113,33 +112,7 @@ tab_chat, tab_files, tab_logs, tab_tickets, tab_requests = st.tabs(
 with tab_chat:
     st.subheader("💬 Chat with Assistant")
 
-    # --- Show model selector for USERS only ---
-    if user["role"] == "user":
-        with st.sidebar:
-            st.markdown("### 🤖 Choose Model")
-            st.session_state.selected_model = st.selectbox(
-                "Assistant Model",
-                ["gemma2-9b-it", "gpt-4o", "llama-2-7b-chat", "claude-3-sonnet", "mixtral-8x7b"],
-                key="chat_model"
-            )
-
-    allowed_apps = ROLE_APPS.get(user["role"], [])
-
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-
-    # Display chat history
-    for msg in st.session_state.chat_history:
-        if msg["role"] == "user":
-            st.chat_message("user").write(msg["text"])
-        else:
-            st.chat_message("assistant").write(msg["text"])
-
-    # --------------------------- CHAT TAB --------------------------- #
-with tab_chat:
-    st.subheader("💬 Chat with Assistant")
-
-    # --- Show model selector for USERS only ---
+    # --- Model selector only for user role ---
     if user["role"] == "user":
         with st.sidebar:
             st.markdown("### 🤖 Choose Model")
@@ -188,7 +161,7 @@ with tab_chat:
                 close = difflib.get_close_matches(app_from_text, allowed_apps, n=1, cutoff=0.5)
                 if close: detected_app = close[0]
 
-        # ✅ Save detection in session state (persists across reruns)
+        # Save detection in session state
         st.session_state.detected_app = detected_app
         st.session_state.detected_version = ver_from_text
 
@@ -265,7 +238,7 @@ with tab_chat:
                         "text": f"✅ Installed {selected_app} {selected_ver}. Ticket {ticket_id} created."
                     })
 
-                    # ✅ Reset detection so dropdown disappears after install
+                    # Reset detection so dropdown disappears after install
                     st.session_state.detected_app = None
                     st.session_state.detected_version = None
                     st.rerun()
@@ -348,7 +321,6 @@ with tab_tickets:
                         df_full.to_excel(ticket_file, index=False)
                         log_action_via_agent(f"SYSTEM: Ticket {chosen_id} deployment completed", user["username"])
                         st.success(f"🎉 Deployment finished! Ticket {chosen_id} closed.")
-                        # trigger popup
                         st.session_state.show_download_modal = {"app": "Approved-App", "ver": "latest"}
 
                     elif action_choice == "Reject ❌":
