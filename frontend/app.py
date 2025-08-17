@@ -135,6 +135,36 @@ with tab_chat:
         else:
             st.chat_message("assistant").write(msg["text"])
 
+    # --------------------------- CHAT TAB --------------------------- #
+with tab_chat:
+    st.subheader("💬 Chat with Assistant")
+
+    # --- Show model selector for USERS only ---
+    if user["role"] == "user":
+        with st.sidebar:
+            st.markdown("### 🤖 Choose Model")
+            st.session_state.selected_model = st.selectbox(
+                "Assistant Model",
+                ["gemma2-9b-it", "gpt-4o", "llama-2-7b-chat", "claude-3-sonnet", "mixtral-8x7b"],
+                key="chat_model"
+            )
+
+    allowed_apps = ROLE_APPS.get(user["role"], [])
+
+    # Init history + detection state
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+    if "detected_app" not in st.session_state:
+        st.session_state.detected_app = None
+        st.session_state.detected_version = None
+
+    # Display chat history
+    for msg in st.session_state.chat_history:
+        if msg["role"] == "user":
+            st.chat_message("user").write(msg["text"])
+        else:
+            st.chat_message("assistant").write(msg["text"])
+
     # ---------------- Chat Input ---------------- #
     user_input = st.chat_input("Type your request (e.g., Install Zoom 5.1)")
     if user_input:
@@ -147,7 +177,7 @@ with tab_chat:
             app_from_text = m.group("app").strip()
             ver_from_text = (m.group("version") or "").strip()
 
-        # Fuzzy match
+        # Fuzzy match app
         detected_app = None
         if app_from_text:
             for app in allowed_apps:
@@ -158,91 +188,101 @@ with tab_chat:
                 close = difflib.get_close_matches(app_from_text, allowed_apps, n=1, cutoff=0.5)
                 if close: detected_app = close[0]
 
-        # ---------------- App Detected ---------------- #
-        if detected_app:
-            st.session_state.chat_history.append({
-                "role": "assistant",
-                "text": f"✅ I detected **{detected_app}**. Please confirm the version below."
-            })
+        # ✅ Save detection in session state (persists across reruns)
+        st.session_state.detected_app = detected_app
+        st.session_state.detected_version = ver_from_text
 
-            with st.chat_message("assistant"):
-                selected_app = st.selectbox("Choose an app", allowed_apps,
-                                            index=allowed_apps.index(detected_app),
-                                            key=f"chat_app_{len(st.session_state.chat_history)}")
+        st.rerun()
 
-                versions = AVAILABLE_APPS[selected_app]
-                default_idx = 0
-                if ver_from_text and ver_from_text in versions:
-                    default_idx = versions.index(ver_from_text)
-                elif ver_from_text:
-                    close_ver = difflib.get_close_matches(ver_from_text, versions, n=1, cutoff=0.3)
-                    if close_ver: default_idx = versions.index(close_ver[0])
+    # ---------------- App Detected ---------------- #
+    if st.session_state.detected_app:
+        detected_app = st.session_state.detected_app
+        ver_from_text = st.session_state.detected_version
 
-                selected_ver = st.selectbox("Choose version", versions,
-                                            index=default_idx,
-                                            key=f"chat_ver_{len(st.session_state.chat_history)}")
+        with st.chat_message("assistant"):
+            st.write(f"✅ I detected **{detected_app}**. Please confirm the version below.")
 
-                # Eligibility
-                APP_ELIGIBILITY = {
-                    "user": {"Zoom": ["latest", "5.0"]},
-                    "manager": {"Zoom": ["latest", "5.0", "5.1"], "MS Excel": ["2019", "2021"]},
-                    "admin": {
-                        "MS Word": ["2016", "2019", "2021"],
-                        "MS Excel": ["2016", "2019", "2021"],
-                        "Zoom": ["5.0", "5.1", "latest"],
-                        "Slack": ["4.20", "4.21", "latest"]
-                    }
+            selected_app = st.selectbox("Choose an app", allowed_apps,
+                                        index=allowed_apps.index(detected_app),
+                                        key="chat_app")
+
+            versions = AVAILABLE_APPS[selected_app]
+            default_idx = 0
+            if ver_from_text and ver_from_text in versions:
+                default_idx = versions.index(ver_from_text)
+            elif ver_from_text:
+                close_ver = difflib.get_close_matches(ver_from_text, versions, n=1, cutoff=0.3)
+                if close_ver: default_idx = versions.index(close_ver[0])
+
+            selected_ver = st.selectbox("Choose version", versions,
+                                        index=default_idx,
+                                        key="chat_ver")
+
+            # Eligibility
+            APP_ELIGIBILITY = {
+                "user": {"Zoom": ["latest", "5.0"]},
+                "manager": {"Zoom": ["latest", "5.0", "5.1"], "MS Excel": ["2019", "2021"]},
+                "admin": {
+                    "MS Word": ["2016", "2019", "2021"],
+                    "MS Excel": ["2016", "2019", "2021"],
+                    "Zoom": ["5.0", "5.1", "latest"],
+                    "Slack": ["4.20", "4.21", "latest"]
                 }
-                allowed_versions = APP_ELIGIBILITY.get(user["role"], {}).get(selected_app, [])
-                eligible = selected_ver in allowed_versions
+            }
+            allowed_versions = APP_ELIGIBILITY.get(user["role"], {}).get(selected_app, [])
+            eligible = selected_ver in allowed_versions
 
-                if eligible:
-                    with st.expander("✅ Eligible! Click to download installer"):
-                        st.download_button(
-                            "⬇️ Download Package",
-                            data=f"Dummy installer for {selected_app} {selected_ver}".encode(),
-                            file_name=f"{selected_app}-{selected_ver}.zip",
-                            mime="application/zip",
-                            key=f"dl_{selected_app}_{selected_ver}"
-                        )
+            if eligible:
+                with st.expander("✅ Eligible! Click to download installer"):
+                    st.download_button(
+                        "⬇️ Download Package",
+                        data=f"Dummy installer for {selected_app} {selected_ver}".encode(),
+                        file_name=f"{selected_app}-{selected_ver}.zip",
+                        mime="application/zip",
+                        key=f"dl_{selected_app}_{selected_ver}"
+                    )
+            else:
+                st.error(f"⛔ Not eligible for {selected_app} {selected_ver}")
+
+            if st.button("🚀 Confirm & Install"):
+                if not eligible:
+                    st.error("⛔ Cannot install: Not eligible for your role.")
                 else:
-                    st.error(f"⛔ Not eligible for {selected_app} {selected_ver}")
+                    action = f"install {selected_app} {selected_ver}"
+                    ticket_id = create_ticket(user, action)
+                    log_action_via_agent(action, user["username"])
 
-                if st.button("🚀 Confirm & Install", key=f"install_{len(st.session_state.chat_history)}"):
-                    if not eligible:
-                        st.error("⛔ Cannot install: Not eligible for your role.")
-                    else:
-                        action = f"install {selected_app} {selected_ver}"
-                        ticket_id = create_ticket(user, action)
-                        log_action_via_agent(action, user["username"])
+                    with st.spinner(f"🚀 Deploying {selected_app} {selected_ver}..."):
+                        progress = st.progress(0)
+                        for i in range(1, 101, 10):
+                            time.sleep(0.15)
+                            progress.progress(i)
 
-                        with st.spinner(f"🚀 Deploying {selected_app} {selected_ver}..."):
-                            progress = st.progress(0)
-                            for i in range(1, 101, 10):
-                                time.sleep(0.15)
-                                progress.progress(i)
+                    st.success(f"✅ Deployment complete! Ticket {ticket_id}")
+                    st.session_state.show_download_modal = {"app": selected_app, "ver": selected_ver}
+                    st.session_state.chat_history.append({
+                        "role": "assistant",
+                        "text": f"✅ Installed {selected_app} {selected_ver}. Ticket {ticket_id} created."
+                    })
 
-                        st.success(f"✅ Deployment complete! Ticket {ticket_id}")
-                        st.session_state.show_download_modal = {"app": selected_app, "ver": selected_ver}
-                        st.session_state.chat_history.append({
-                            "role": "assistant",
-                            "text": f"✅ Installed {selected_app} {selected_ver}. Ticket {ticket_id} created."
-                        })
+                    # ✅ Reset detection so dropdown disappears after install
+                    st.session_state.detected_app = None
+                    st.session_state.detected_version = None
+                    st.rerun()
 
-        # ---------------- Otherwise → Chatbot ---------------- #
-        else:
+    # ---------------- Otherwise → Chatbot ---------------- #
+    elif st.session_state.chat_history:
+        last_msg = st.session_state.chat_history[-1]
+        if last_msg["role"] == "user":  # only if last was user input
             chosen_model = st.session_state.get("selected_model", "Default-Agent")
-            payload = {"input": user_input, "user": user["username"], "model": chosen_model}
-
+            payload = {"input": last_msg["text"], "user": user["username"], "model": chosen_model}
             try:
                 res = api_post("/agent/", payload)
                 reply = res.get("output") or res.get("message") or "⚠️ Unexpected backend response."
             except Exception as e:
                 reply = f"❌ Backend error: {e}"
-
             st.session_state.chat_history.append({"role": "assistant", "text": reply})
-
-        st.rerun()
+            st.rerun()
 
 # --------------------------- FILES TAB --------------------------- #
 with tab_files:
