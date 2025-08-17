@@ -105,97 +105,140 @@ FILES_PERMISSIONS = {
 }
 
 # --------------------------- TABS --------------------------- #
-tab_chat, tab_files, tab_logs, tab_tickets = st.tabs(
-    ["💬 Chat / Install","📁 Files","📑 Logs","🎫 Tickets"]
+tab_chat, tab_files, tab_logs, tab_tickets, tab_requests = st.tabs(
+    ["💬 Chat / Install","📁 Files","📑 Logs","🎫 Tickets","📌 Requests / Approvals"]
 )
 
 # --------------------------- CHAT TAB --------------------------- #
 with tab_chat:
     st.subheader("💬 Chat with Assistant")
 
-    # --- free text input ---
-    typed_query = st.text_input("Type app name (optionally with version)", placeholder="e.g., Zoom OR MS Word 2019")
+    # --- Show model selector for USERS only ---
+    if user["role"] == "user":
+        with st.sidebar:
+            st.markdown("### 🤖 Choose Model")
+            st.session_state.selected_model = st.selectbox(
+                "Assistant Model",
+                ["gemma2-9b-it", "gpt-4o", "llama-2-7b-chat", "claude-3-sonnet", "mixtral-8x7b"],
+                key="chat_model"
+            )
 
-    app_from_text, ver_from_text = None, None
-    if typed_query.strip():
-        m = re.match(r".*?(?P<app>[A-Za-z][\w\s]*)\s*(?P<version>[\w\.]+)?", typed_query, re.I)
+    # ---------------- Role-based App Access ---------------- #
+    ROLE_APPS = {
+        "user": ["Zoom"],
+        "manager": ["Zoom", "MS Excel"],
+        "admin": list(AVAILABLE_APPS.keys()),
+    }
+    allowed_apps = ROLE_APPS.get(user["role"], [])
+
+    # ---------------- Chat History ---------------- #
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+
+    # Display chat history
+    for msg in st.session_state.chat_history:
+        if msg["role"] == "user":
+            st.chat_message("user").write(msg["text"])
+        else:
+            st.chat_message("assistant").write(msg["text"])
+
+    # ---------------- Chat Input ---------------- #
+    user_input = st.chat_input("Type your request (e.g., Install Zoom 5.1)")
+    if user_input:
+        st.session_state.chat_history.append({"role": "user", "text": user_input})
+
+        # Detect app/version from text
+        app_from_text, ver_from_text = None, None
+        m = re.match(r".*?(?P<app>[A-Za-z][\w\s]*)\s*(?P<version>[\w\.]+)?", user_input, re.I)
         if m:
             app_from_text = m.group("app").strip()
             ver_from_text = (m.group("version") or "").strip()
 
-    all_apps = list(AVAILABLE_APPS.keys())
+        # Fuzzy match app (only from allowed apps!)
+        detected_app = None
+        if app_from_text:
+            for app in allowed_apps:
+                if app_from_text.lower() in app.lower():
+                    detected_app = app
+                    break
+            if not detected_app:
+                close = difflib.get_close_matches(app_from_text, allowed_apps, n=1, cutoff=0.5)
+                if close:
+                    detected_app = close[0]
 
-    # fuzzy match app
-    detected_app = None
-    if app_from_text:
-        for app in all_apps:
-            if app_from_text.lower() in app.lower():
-                detected_app = app
-                break
-        if not detected_app:
-            close = difflib.get_close_matches(app_from_text, all_apps, n=1, cutoff=0.5)
-            if close:
-                detected_app = close[0]
+        # ---------------- App Detected → Confirm Install ---------------- #
+        if detected_app:
+            st.session_state.chat_history.append({
+                "role": "assistant",
+                "text": f"✅ I detected **{detected_app}**. Please confirm the version below."
+            })
 
-    # --- dropdown for app ---
-    selected_app = st.selectbox(
-        "Choose an app",
-        [""] + all_apps,
-        index=(all_apps.index(detected_app) + 1 if detected_app else 0),
-        key="app_select"
-    )
+            with st.chat_message("assistant"):
+                selected_app = st.selectbox(
+                    "Choose an app",
+                    allowed_apps,
+                    index=allowed_apps.index(detected_app),
+                    key=f"chat_app_{len(st.session_state.chat_history)}"
+                )
 
-    # --- dropdown for version ---
-    selected_ver = None
-    if selected_app:
-        versions = AVAILABLE_APPS[selected_app]
-        default_idx = 0
-        if ver_from_text:
-            if ver_from_text in versions:
-                default_idx = versions.index(ver_from_text)
-            else:
-                close_ver = difflib.get_close_matches(ver_from_text, versions, n=1, cutoff=0.3)
-                if close_ver:
-                    default_idx = versions.index(close_ver[0])
+                versions = AVAILABLE_APPS[selected_app]
+                default_idx = 0
+                if ver_from_text and ver_from_text in versions:
+                    default_idx = versions.index(ver_from_text)
+                elif ver_from_text:
+                    close_ver = difflib.get_close_matches(ver_from_text, versions, n=1, cutoff=0.3)
+                    if close_ver:
+                        default_idx = versions.index(close_ver[0])
 
-        selected_ver = st.selectbox(
-            "Choose version",
-            versions,
-            index=default_idx,
-            key="ver_select"
-        )
+                selected_ver = st.selectbox(
+                    "Choose version",
+                    versions,
+                    index=default_idx,
+                    key=f"chat_ver_{len(st.session_state.chat_history)}"
+                )
 
-    # --- extra generic chat box ---
-    q = st.text_area("Or type your message", placeholder="e.g., Having issues installing Zoom")
+                if st.button("🚀 Confirm & Install", key=f"install_{len(st.session_state.chat_history)}"):
+                    action = f"install {selected_app} {selected_ver}"
+                    ticket_id = create_ticket(user, action)
+                    log_action_via_agent(action, user["username"])
 
-    # --- action button ---
-    if st.button("Send to Assistant"):
-        if selected_app and selected_ver:
-            action = f"install {selected_app} {selected_ver}"
-            ticket_id = create_ticket(user, action)
-            with st.spinner(f"🚀 Deploying {selected_app} {selected_ver}..."):
-                progress = st.progress(0)
-                for i in range(1, 101, 10):
-                    time.sleep(0.15)
-                    progress.progress(i)
-            st.success(f"✅ Deployment complete! Ticket {ticket_id}")
-            log_action_via_agent(action, user["username"])
-            st.download_button(
-                "⬇️ Download Package",
-                data=f"Dummy installer for {selected_app} {selected_ver}".encode(),
-                file_name=f"{selected_app}-{selected_ver}.zip",
-                mime="application/zip"
-            )
-        elif q.strip():
-            try:
-                res = api_post("/agent/", {"input": q, "user": user["username"]})
-                if "output" in res: st.info(res["output"])
-                elif "message" in res: st.success(res["message"])
-                else: st.warning("Unexpected backend response.")
-            except Exception as e:
-                st.error(f"Backend error: {e}")
+                    with st.spinner(f"🚀 Deploying {selected_app} {selected_ver}..."):
+                        progress = st.progress(0)
+                        for i in range(1, 101, 10):
+                            time.sleep(0.15)
+                            progress.progress(i)
+
+                    st.success(f"✅ Deployment complete! Ticket {ticket_id}")
+                    st.download_button(
+                        "⬇️ Download Package",
+                        data=f"Dummy installer for {selected_app} {selected_ver}".encode(),
+                        file_name=f"{selected_app}-{selected_ver}.zip",
+                        mime="application/zip"
+                    )
+                    st.session_state.chat_history.append({
+                        "role": "assistant",
+                        "text": f"✅ Installed {selected_app} {selected_ver}. Ticket {ticket_id} created."
+                    })
+
+        # ---------------- Otherwise → Fallback Chatbot ---------------- #
         else:
-            st.warning("Select an app/version or type a query.")
+            chosen_model = st.session_state.get("selected_model", "Default-Agent")
+            payload = {"input": user_input, "user": user["username"], "model": chosen_model}
+
+            try:
+                res = api_post("/agent/", payload)
+                if "output" in res:
+                    reply = res["output"]
+                elif "message" in res:
+                    reply = res["message"]
+                else:
+                    reply = "⚠️ Unexpected backend response."
+            except Exception as e:
+                reply = f"❌ Backend error: {e}"
+
+            st.session_state.chat_history.append({"role": "assistant", "text": reply})
+
+        st.rerun()
 
 # --------------------------- FILES TAB --------------------------- #
 with tab_files:
@@ -282,20 +325,55 @@ with tab_tickets:
 
         st.dataframe(df_tickets, use_container_width=True)
 
-        # ✏️ Managers/Admins can update ticket status
+        # ✅ Managers/Admins can approve/reject requests
         if user["role"] in ["manager", "admin"] and not df_tickets.empty:
-            st.markdown("### ✏️ Update Ticket Status")
-            ticket_ids = df_tickets["TicketID"].tolist()
-            chosen_id = st.selectbox("Select Ticket", ticket_ids)
-            new_status = st.selectbox("New Status", ["Open", "In Progress", "Closed"])
+            st.markdown("### 📝 Approve / Reject Requests")
 
-            if st.button("Update Ticket"):
-                df_full = pd.read_excel(ticket_file)  # reload
-                df_full.loc[df_full["TicketID"] == chosen_id, "Status"] = new_status
-                df_full.to_excel(ticket_file, index=False)
-                log_action_via_agent(f"SYSTEM: Ticket {chosen_id} updated to {new_status}", user["username"])
-                st.success(f"✅ Ticket {chosen_id} updated to {new_status}")
-                st.rerun()
+            # Filter only Open tickets for approval
+            pending_tickets = df_tickets[df_tickets["Status"] == "Open"]
+
+            if not pending_tickets.empty:
+                ticket_ids = pending_tickets["TicketID"].tolist()
+                chosen_id = st.selectbox("Select Pending Ticket", ticket_ids)
+
+                action_choice = st.radio(
+                    "Action",
+                    ["Approve ✅", "Reject ❌"],
+                    horizontal=True
+                )
+
+                if st.button("Submit Decision"):
+                    df_full = pd.read_excel(ticket_file)  # reload
+                    if action_choice == "Approve ✅":
+                        df_full.loc[df_full["TicketID"] == chosen_id, "Status"] = "In Progress"
+                        df_full.to_excel(ticket_file, index=False)
+
+                        log_action_via_agent(f"SYSTEM: Ticket {chosen_id} approved and deployment started", user["username"])
+                        st.success(f"✅ Ticket {chosen_id} approved! Deployment in progress...")
+
+                        # 🚀 Simulate deployment progress
+                        with st.spinner("Deploying..."):
+                            progress = st.progress(0)
+                            for i in range(1, 101, 20):
+                                time.sleep(0.3)
+                                progress.progress(i)
+
+                        # Mark as closed
+                        df_full.loc[df_full["TicketID"] == chosen_id, "Status"] = "Closed"
+                        df_full.to_excel(ticket_file, index=False)
+                        log_action_via_agent(f"SYSTEM: Ticket {chosen_id} deployment completed", user["username"])
+                        st.success(f"🎉 Deployment finished! Ticket {chosen_id} closed.")
+
+                    elif action_choice == "Reject ❌":
+                        df_full.loc[df_full["TicketID"] == chosen_id, "Status"] = "Closed"
+                        df_full.to_excel(ticket_file, index=False)
+
+                        log_action_via_agent(f"SYSTEM: Ticket {chosen_id} rejected by {user['username']}", user["username"])
+                        st.error(f"❌ Ticket {chosen_id} rejected.")
+
+                    st.rerun()
+            else:
+                st.info("✅ No pending tickets for approval.")
 
         # Export tickets
         st.download_button(
@@ -306,3 +384,103 @@ with tab_tickets:
         )
     else:
         st.info("No tickets logged yet.")
+
+# --------------------------- REQUESTS TAB --------------------------- #
+with tab_requests:
+    st.subheader("📌 App Requests & Admin Approval")
+    req_file = "requests.xlsx"
+
+    if os.path.exists(req_file):
+        df_reqs = pd.read_excel(req_file)
+    else:
+        df_reqs = pd.DataFrame(columns=["RequestID","User","App","Version","Status"])
+
+    # ---------------- ROLE-BASED ELIGIBILITY ---------------- #
+    APP_ELIGIBILITY = {
+        "user": {
+            "Zoom": ["latest", "5.0"]
+        },
+        "manager": {
+            "Zoom": ["latest", "5.0", "5.1"],
+            "MS Excel": ["2019", "2021"]
+        },
+        "admin": {
+            "MS Word": ["2016", "2019", "2021"],
+            "MS Excel": ["2016", "2019", "2021"],
+            "Zoom": ["5.0", "5.1", "latest"],
+            "Slack": ["4.20", "4.21", "latest"]
+        }
+    }
+
+    # --- Normal users: submit new requests ---
+    if user["role"] == "user":
+        st.markdown("### ➕ Submit New Request")
+        req_app = st.selectbox("Select App", list(AVAILABLE_APPS.keys()))
+        req_ver = st.selectbox("Select Version", AVAILABLE_APPS[req_app])
+
+        if st.button("Submit Request"):
+            req_id = str(uuid.uuid4())[:8]
+            new_req = {
+                "RequestID": req_id,
+                "User": user["username"],
+                "App": req_app,
+                "Version": req_ver,
+                "Status": "Pending",
+            }
+            df_reqs = pd.concat([df_reqs, pd.DataFrame([new_req])], ignore_index=True)
+            df_reqs.to_excel(req_file, index=False)
+            log_action_via_agent(f"REQUEST: {user['username']} requested {req_app} {req_ver}", user["username"])
+            st.success(f"✅ Request {req_id} submitted for {req_app} {req_ver}")
+            st.rerun()
+
+    # --- Managers/Admins: see and approve requests ---
+    if user["role"] in ["manager","admin"]:
+        st.markdown("### 📝 Review Requests")
+        if df_reqs.empty:
+            st.info("No requests yet.")
+        else:
+            st.dataframe(df_reqs, use_container_width=True)
+            pending = df_reqs[df_reqs["Status"]=="Pending"]
+            if not pending.empty:
+                chosen_req_id = st.selectbox("Select Request to Approve/Reject", pending["RequestID"])
+                chosen_req = pending[pending["RequestID"] == chosen_req_id].iloc[0]
+
+                app_name, version, req_user = chosen_req["App"], chosen_req["Version"], chosen_req["User"]
+
+                # Detect requester's role (based on username convention)
+                if req_user == "admin":
+                    req_role = "admin"
+                elif req_user == "bob":
+                    req_role = "manager"
+                else:
+                    req_role = "user"
+
+                # Eligibility check
+                allowed_versions = APP_ELIGIBILITY.get(req_role, {}).get(app_name, [])
+                eligible = version in allowed_versions
+
+                if eligible:
+                    st.success(f"✅ Eligible: {app_name} {version} allowed for role `{req_role}`")
+                else:
+                    st.error(f"⛔ Not Eligible: {app_name} {version} is NOT allowed for role `{req_role}`")
+
+                decision = st.selectbox("Decision", ["Approve","Reject"])
+
+                if st.button("Update Request"):
+                    if decision == "Approve" and not eligible:
+                        st.error("⛔ Cannot approve: This app/version is not allowed for the user's role.")
+                    else:
+                        df_reqs.loc[df_reqs["RequestID"] == chosen_req_id, "Status"] = decision
+                        df_reqs.to_excel(req_file, index=False)
+                        log_action_via_agent(f"ADMIN: {user['username']} set request {chosen_req_id} to {decision}", user["username"])
+                        st.success(f"✅ Request {chosen_req_id} marked as {decision}")
+                        st.rerun()
+
+    # --- Export requests ---
+    if not df_reqs.empty:
+        st.download_button(
+            "⬇️ Export requests",
+            data=open(req_file,"rb").read(),
+            file_name="requests.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
